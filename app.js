@@ -1,68 +1,31 @@
 /* =========================================================
    VIDAPET · APP.JS
-   Estado global, navegación SPA y toda la interactividad.
-   No requiere backend: todo se simula con un objeto "state"
-   persistido en localStorage (Mock API).
+   Capa de UI: mapea los formularios/botones/tablas del HTML
+   a los métodos de VidaPetStore (store.js) y renderiza el DOM.
+   No contiene lógica de persistencia: eso vive en store.js.
    ========================================================= */
 
-const STORAGE_KEY = 'vidapet_state_v1';
+const db = new VidaPetStore('vidapet');
+
+/* Preferencias de UI que no son datos de negocio (tema, mascota
+   activa, notificaciones) se guardan aparte, fuera del store de datos. */
+const UI_KEY = 'vidapet_ui_prefs';
+function loadUiPrefs(){
+  try{ return Object.assign({ theme:'light', notificaciones:true, selectedPetId:null }, JSON.parse(localStorage.getItem(UI_KEY)) || {}); }
+  catch(e){ return { theme:'light', notificaciones:true, selectedPetId:null }; }
+}
+function saveUiPrefs(){ localStorage.setItem(UI_KEY, JSON.stringify(ui)); }
+let ui = loadUiPrefs();
+
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DOWS = ['D','L','M','M','J','V','S'];
 
 /* ---------------------------------------------------------
-   1) ESTADO / MOCK API (localStorage)
-   --------------------------------------------------------- */
-function defaultState(){
-  return {
-    theme: 'light',
-    notificaciones: true,
-    perfil: { nombre: '', telefono: '' },
-    selectedPetId: 1,
-    pets: [
-      { id:1, nombre:'Rocco', especie:'Perro', raza:'Labrador', color:'Dorado', sexo:'Macho', nacimiento:'2022-04-10', peso:'28', altura:'55', comentarios:'', foto:null },
-      { id:2, nombre:'Nina', especie:'Gato', raza:'Siames', color:'Blanco', sexo:'Hembra', nacimiento:'2021-09-02', peso:'4', altura:'25', comentarios:'', foto:null }
-    ],
-    events: [
-      { id:101, petId:1, tipo:'vacuna', nombre:'Antirrábica', info:'Dosis anual', fecha:'2026-08-28' },
-      { id:102, petId:1, tipo:'medicamento', nombre:'Antipulgas', info:'Aplicación tópica mensual', fecha:'2026-09-05' }
-    ],
-    historial: [
-      { petId:1, mes:'JUL 2026', fecha:'30/07/2026', titulo:'Medicamento', desc:'Antibiótico — Amoxicilina 250mg. Administrar cada 12h por 7 días' },
-      { petId:2, mes:'ABR 2026', fecha:'02/04/2026', titulo:'Consulta', desc:'Clínico general — Revisión general. Control de peso' }
-    ],
-    servicesCatalog: [
-      { key:'medicamentos', nombre:'Medicamentos' },
-      { key:'antipulgas', nombre:'Antipulgas' },
-      { key:'consultas', nombre:'Consultas' },
-      { key:'vacunas', nombre:'Vacunas' },
-      { key:'banio', nombre:'Baño y corte de uñas' },
-      { key:'pelo', nombre:'Corte de pelo' },
-      { key:'consultaGeneral', nombre:'Consulta general' }
-    ],
-    serviceCounts: {}
-  };
-}
-
-let state = loadState();
-
-function loadState(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if(raw) return Object.assign(defaultState(), JSON.parse(raw));
-  }catch(e){ /* localStorage corrupto: se ignora y se usa el estado por defecto */ }
-  return defaultState();
-}
-function saveState(){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-/* ---------------------------------------------------------
-   2) NAVEGACIÓN SPA (sin recarga de página)
+   1) NAVEGACIÓN SPA (sin recarga de página)
    --------------------------------------------------------- */
 function goTo(viewName){
   document.querySelectorAll('.vp-view').forEach(v => v.classList.remove('active'));
   document.getElementById('view-' + viewName).classList.add('active');
-
   document.querySelectorAll('.vp-nav-btn').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.target === viewName);
   });
@@ -72,16 +35,20 @@ function goTo(viewName){
   if(viewName === 'add-servicio') renderServicios();
   if(viewName === 'historial') renderHistorial();
 }
-
 document.querySelectorAll('.vp-nav-btn').forEach(btn=>{
   btn.addEventListener('click', ()=> goTo(btn.dataset.target));
 });
 
-/* Splash → Mascotas tras 2s */
 window.addEventListener('DOMContentLoaded', ()=>{
-  applyTheme(state.theme);
-  document.getElementById('darkSwitch').checked = (state.theme === 'dark');
-  document.getElementById('notifSwitch').checked = state.notificaciones;
+  applyTheme(ui.theme);
+  document.getElementById('darkSwitch').checked = (ui.theme === 'dark');
+  document.getElementById('notifSwitch').checked = ui.notificaciones;
+
+  if(!ui.selectedPetId){
+    const primera = db.getMascotas()[0];
+    if(primera) ui.selectedPetId = primera.id;
+  }
+
   setTimeout(()=>{
     document.getElementById('view-splash').classList.remove('active');
     goTo('mascotas');
@@ -89,7 +56,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
 });
 
 /* ---------------------------------------------------------
-   3) TOAST (notificaciones de éxito)
+   2) TOAST + THEME
    --------------------------------------------------------- */
 let toastTimer = null;
 function showToast(msg){
@@ -99,48 +66,31 @@ function showToast(msg){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=> t.classList.remove('show'), 2200);
 }
-
-/* ---------------------------------------------------------
-   4) MODO OSCURO (data-bs-theme, requerido por Bootstrap 5.3)
-   --------------------------------------------------------- */
-function applyTheme(theme){
-  document.documentElement.setAttribute('data-bs-theme', theme);
-  state.theme = theme;
-}
-function toggleDarkMode(isDark){
-  applyTheme(isDark ? 'dark' : 'light');
-  saveState();
-  showToast(isDark ? 'Modo oscuro activado' : 'Modo claro activado');
-}
-function toggleNotificaciones(checked){
-  state.notificaciones = checked;
-  saveState();
-  showToast(checked ? 'Notificaciones activadas' : 'Notificaciones desactivadas');
-}
-
-/* Helper genérico para obtener/crear una instancia de modal Bootstrap */
+function applyTheme(theme){ document.documentElement.setAttribute('data-bs-theme', theme); ui.theme = theme; }
+function toggleDarkMode(isDark){ applyTheme(isDark?'dark':'light'); saveUiPrefs(); showToast(isDark?'Modo oscuro activado':'Modo claro activado'); }
+function toggleNotificaciones(checked){ ui.notificaciones = checked; saveUiPrefs(); showToast(checked?'Notificaciones activadas':'Notificaciones desactivadas'); }
 function modalOf(id){ return bootstrap.Modal.getOrCreateInstance(document.getElementById(id)); }
 
 /* ---------------------------------------------------------
-   5) VISTA: MASCOTAS
+   3) VISTA: MASCOTAS
    --------------------------------------------------------- */
-function initials(name){ return (name || '?').trim().charAt(0).toUpperCase(); }
+function initials(name){ return (name||'?').trim().charAt(0).toUpperCase(); }
 
 function renderMascotas(){
+  const mascotas = db.getMascotas();
   const row = document.getElementById('petsAvatarRow');
   const empty = document.getElementById('mascotasEmptyState');
   row.innerHTML = '';
 
-  state.pets.forEach(pet=>{
+  mascotas.forEach(pet=>{
     const col = document.createElement('div');
     col.className = 'text-center';
     col.innerHTML = `
-      <div class="vp-pet-avatar ${pet.id===state.selectedPetId?'selected':''}" onclick="selectPet(${pet.id})">
+      <div class="vp-pet-avatar ${pet.id===ui.selectedPetId?'selected':''}" data-select-pet="${pet.id}">
         ${pet.foto ? `<img src="${pet.foto}" alt="${pet.nombre}">` : initials(pet.nombre)}
       </div>
       <div class="vp-pet-name">${pet.nombre}</div>
-      <div class="vp-pet-breed">${pet.raza || pet.especie}</div>
-    `;
+      <div class="vp-pet-breed">${pet.raza || pet.especie}</div>`;
     row.appendChild(col);
   });
 
@@ -148,37 +98,35 @@ function renderMascotas(){
   addCol.className = 'text-center';
   addCol.innerHTML = `
     <button class="vp-add-avatar" onclick="goTo('add-mascota')" aria-label="Añadir mascota"><i class="bi bi-plus-lg"></i></button>
-    <div class="vp-pet-name">&nbsp;</div>
-  `;
+    <div class="vp-pet-name">&nbsp;</div>`;
   row.appendChild(addCol);
 
-  const sinMascotas = state.pets.length === 0;
-  empty.innerHTML = sinMascotas
+  row.querySelectorAll('[data-select-pet]').forEach(el=>{
+    el.addEventListener('click', ()=> selectPet(el.dataset.selectPet));
+  });
+
+  empty.innerHTML = mascotas.length === 0
     ? `<div class="vp-empty mb-3"><i class="bi bi-heart"></i><p>Aún no tienes mascotas registradas.<br>Toca "+" para añadir la primera.</p></div>`
     : '';
 
-  ['btnEliminarMascota','btnReagendar','btnCancelar'].forEach(id=>{
-    document.getElementById(id).disabled = sinMascotas;
+  ['btnEliminarMascota','btnReagendar','btnCancelar','btnNota'].forEach(id=>{
+    document.getElementById(id).disabled = mascotas.length === 0;
   });
 }
 
-function selectPet(id){
-  state.selectedPetId = id;
-  saveState();
-  renderMascotas();
-}
+function selectPet(id){ ui.selectedPetId = id; saveUiPrefs(); renderMascotas(); }
 
 function eliminarMascotaSeleccionada(){
-  if(state.pets.length === 0){ showToast('No hay mascotas para eliminar'); return; }
-  const pet = state.pets.find(p=>p.id===state.selectedPetId) || state.pets[0];
+  const mascotas = db.getMascotas();
+  if(mascotas.length === 0){ showToast('No hay mascotas para eliminar'); return; }
+  const pet = db.getMascota(ui.selectedPetId) || mascotas[0];
   document.getElementById('deletePetMsg').textContent = `¿Eliminar a ${pet.nombre}? Esta acción no se puede deshacer.`;
 
-  const btn = document.getElementById('btnConfirmDeletePet');
-  btn.onclick = ()=>{
-    state.pets = state.pets.filter(p=>p.id !== pet.id);
-    state.events = state.events.filter(ev=>ev.petId !== pet.id);
-    if(state.pets.length){ state.selectedPetId = state.pets[0].id; }
-    saveState();
+  document.getElementById('btnConfirmDeletePet').onclick = ()=>{
+    db.deleteMascota(pet.id); // el store hace el log + borra sus citas en cascada
+    const restantes = db.getMascotas();
+    ui.selectedPetId = restantes.length ? restantes[0].id : null;
+    saveUiPrefs();
     renderMascotas();
     modalOf('modalConfirmDeletePet').hide();
     showToast(`${pet.nombre} fue eliminado`);
@@ -191,26 +139,33 @@ function irReagendar(){ abrirSelectorDeCita('reagendar'); }
 function irCancelar(){ abrirSelectorDeCita('cancelar'); }
 
 function abrirSelectorDeCita(modo){
-  const pet = state.pets.find(p=>p.id===state.selectedPetId) || state.pets[0];
+  const pet = db.getMascota(ui.selectedPetId) || db.getMascotas()[0];
   if(!pet){ showToast('No hay mascotas registradas'); return; }
 
-  const eventosPet = state.events.filter(ev=>ev.petId===pet.id)
+  const citasPet = db.getCitasPorMascota(pet.id)
+    .filter(c => c.estado !== 'cancelada')
     .sort((a,b)=> new Date(a.fecha) - new Date(b.fecha));
 
   document.getElementById('pickEventTitle').textContent =
     modo === 'reagendar' ? `Reagendar cita de ${pet.nombre}` : `Cancelar cita de ${pet.nombre}`;
 
   const list = document.getElementById('pickEventList');
-  if(eventosPet.length === 0){
+  if(citasPet.length === 0){
     list.innerHTML = `<div class="vp-empty"><i class="bi bi-calendar-x"></i><p>${pet.nombre} no tiene citas agendadas.</p></div>`;
   } else {
-    list.innerHTML = eventosPet.map(ev => eventCardHTML(ev, `onclick="modalOf('modalPickEvent').hide(); openEventActionModal(${ev.id}, '${modo}');"`)).join('');
+    list.innerHTML = citasPet.map(c => eventCardHTML(c)).join('');
+    list.querySelectorAll('[data-event-id]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        modalOf('modalPickEvent').hide();
+        openEventActionModal(btn.dataset.eventId, modo);
+      });
+    });
   }
   modalOf('modalPickEvent').show();
 }
 
 /* ---------------------------------------------------------
-   6) VISTA: AÑADIR MASCOTA
+   4) VISTA: AÑADIR MASCOTA
    --------------------------------------------------------- */
 let pendingPetPhoto = null;
 
@@ -231,8 +186,7 @@ document.getElementById('formAddPet').addEventListener('submit', function(e){
   const nombre = document.getElementById('petNombre').value.trim();
   if(!nombre){ showToast('Ingresa el nombre de la mascota'); return; }
 
-  const newPet = {
-    id: Date.now(),
+  const nuevaMascota = db.addMascota({
     nombre,
     especie: document.getElementById('petEspecie').value,
     raza: document.getElementById('petRaza').value.trim(),
@@ -243,10 +197,10 @@ document.getElementById('formAddPet').addEventListener('submit', function(e){
     altura: document.getElementById('petAltura').value,
     comentarios: document.getElementById('petComentarios').value.trim(),
     foto: pendingPetPhoto
-  };
-  state.pets.push(newPet);
-  state.selectedPetId = newPet.id;
-  saveState();
+  });
+
+  ui.selectedPetId = nuevaMascota.id;
+  saveUiPrefs();
 
   this.reset();
   pendingPetPhoto = null;
@@ -257,25 +211,27 @@ document.getElementById('formAddPet').addEventListener('submit', function(e){
 });
 
 /* ---------------------------------------------------------
-   7) VISTA: AGENDA (calendario + eventos + citas)
+   5) VISTA: AGENDA (calendario + citas)
    --------------------------------------------------------- */
-let calDate = new Date(); // mes actual
-
+let calDate = new Date();
 function pad(n){ return String(n).padStart(2,'0'); }
 
 function renderAgenda(){
-  const pet = state.pets.find(p=>p.id===state.selectedPetId) || state.pets[0];
+  const pet = db.getMascota(ui.selectedPetId) || db.getMascotas()[0];
   const infoBox = document.getElementById('agendaPetInfo');
 
   if(pet){
-    const opciones = state.pets.map(p=>`<option value="${p.id}" ${p.id===pet.id?'selected':''}>${p.nombre}</option>`).join('');
+    const opciones = db.getMascotas().map(p=>`<option value="${p.id}" ${p.id===pet.id?'selected':''}>${p.nombre}</option>`).join('');
     infoBox.innerHTML = `
       <div class="vp-mini-avatar">${pet.foto?`<img src="${pet.foto}">`:initials(pet.nombre)}</div>
       <div class="flex-grow-1">
         <div style="font-weight:700;font-size:.9rem;">${pet.nombre}</div>
         <div style="font-size:.68rem;opacity:.8;">${pet.especie} · ${pet.raza||'—'} · ${edadTexto(pet.nacimiento)}</div>
       </div>
-      <select onchange="state.selectedPetId=Number(this.value); saveState(); renderAgenda();">${opciones}</select>`;
+      <select id="agendaPetSelect">${opciones}</select>`;
+    document.getElementById('agendaPetSelect').addEventListener('change', function(){
+      ui.selectedPetId = this.value; saveUiPrefs(); renderAgenda();
+    });
   } else {
     infoBox.innerHTML = `<div style="font-size:.85rem;">Añade tu primera mascota para ver su agenda.</div>`;
   }
@@ -285,76 +241,65 @@ function renderAgenda(){
 
 function edadTexto(fechaISO){
   if(!fechaISO) return 'edad desconocida';
-  const nac = new Date(fechaISO);
-  const hoy = new Date();
+  const nac = new Date(fechaISO), hoy = new Date();
   let years = hoy.getFullYear() - nac.getFullYear();
   const m = hoy.getMonth() - nac.getMonth();
   if(m < 0 || (m===0 && hoy.getDate() < nac.getDate())) years--;
   return years >= 0 ? `${years} años` : '—';
 }
 
-function changeMonth(delta){
-  calDate.setMonth(calDate.getMonth() + delta);
-  renderCalendar();
-  renderEventsList();
-}
+function changeMonth(delta){ calDate.setMonth(calDate.getMonth()+delta); renderCalendar(); renderEventsList(); }
 
 function renderCalendar(){
   document.getElementById('calMonthLabel').textContent = `${MESES[calDate.getMonth()]} ${calDate.getFullYear()}`;
   const grid = document.getElementById('calGrid');
   grid.innerHTML = '';
-  DOWS.forEach(d=>{
-    const el = document.createElement('div');
-    el.className = 'vp-cal-dow';
-    el.textContent = d;
-    grid.appendChild(el);
-  });
+  DOWS.forEach(d=>{ const el=document.createElement('div'); el.className='vp-cal-dow'; el.textContent=d; grid.appendChild(el); });
 
-  const year = calDate.getFullYear(), month = calDate.getMonth();
-  const firstDow = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month+1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const year=calDate.getFullYear(), month=calDate.getMonth();
+  const firstDow = new Date(year,month,1).getDay();
+  const daysInMonth = new Date(year,month+1,0).getDate();
+  const daysInPrevMonth = new Date(year,month,0).getDate();
   const today = new Date();
 
-  const petEvents = state.events.filter(ev => !state.selectedPetId || ev.petId === state.selectedPetId);
-  const eventDays = new Set(petEvents
-    .filter(ev=>{ const d=new Date(ev.fecha); return d.getFullYear()===year && d.getMonth()===month; })
-    .map(ev=> new Date(ev.fecha).getDate()));
+  const citas = db.getCitas().filter(c => c.estado !== 'cancelada' && (!ui.selectedPetId || c.mascotaId === ui.selectedPetId));
+  const eventDays = new Set(citas
+    .filter(c=>{ const d=new Date(c.fecha); return d.getFullYear()===year && d.getMonth()===month; })
+    .map(c=> new Date(c.fecha).getDate()));
 
-  for(let i=firstDow-1; i>=0; i--){ grid.appendChild(dayCell(daysInPrevMonth - i, true, false, false)); }
+  for(let i=firstDow-1;i>=0;i--) grid.appendChild(dayCell(daysInPrevMonth-i, true,false,false));
   for(let d=1; d<=daysInMonth; d++){
     const isToday = today.getFullYear()===year && today.getMonth()===month && today.getDate()===d;
-    grid.appendChild(dayCell(d, false, isToday, eventDays.has(d)));
+    grid.appendChild(dayCell(d,false,isToday,eventDays.has(d)));
   }
-  const totalCells = firstDow + daysInMonth;
-  const trailing = (7 - (totalCells % 7)) % 7;
-  for(let d=1; d<=trailing; d++){ grid.appendChild(dayCell(d, true, false, false)); }
+  const trailing = (7 - ((firstDow+daysInMonth)%7))%7;
+  for(let d=1; d<=trailing; d++) grid.appendChild(dayCell(d,true,false,false));
 }
-
-function dayCell(num, muted, isToday, hasEvent){
-  const el = document.createElement('div');
-  el.className = 'vp-cal-day' + (muted?' muted':'') + (isToday?' today':'') + (hasEvent?' has-event':'');
-  el.textContent = num;
+function dayCell(num,muted,isToday,hasEvent){
+  const el=document.createElement('div');
+  el.className='vp-cal-day'+(muted?' muted':'')+(isToday?' today':'')+(hasEvent?' has-event':'');
+  el.textContent=num;
   return el;
 }
 
 function eventTipoMeta(tipo){
-  if(tipo === 'vacuna') return { icon:'bi-shield-plus', label:'Vacuna' };
-  if(tipo === 'consulta') return { icon:'bi-clipboard2-pulse', label:'Consulta' };
-  return { icon:'bi-capsule', label:'Medicamento' };
+  if(tipo==='vacuna') return {icon:'bi-shield-plus', label:'Vacuna'};
+  if(tipo==='consulta') return {icon:'bi-clipboard2-pulse', label:'Consulta'};
+  return {icon:'bi-capsule', label:'Medicamento'};
 }
 
-function eventCardHTML(ev, extraAttrs=''){
-  const pet = state.pets.find(p=>p.id===ev.petId);
-  const meta = eventTipoMeta(ev.tipo);
-  const fechaFmt = new Date(ev.fecha + 'T00:00:00').toLocaleDateString('es-ES', {day:'2-digit', month:'short', year:'numeric'});
+function eventCardHTML(c){
+  const pet = db.getMascota(c.mascotaId);
+  const meta = eventTipoMeta(c.tipo);
+  const fechaFmt = new Date(c.fecha+'T00:00:00').toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'});
+  const estadoTag = c.estado === 'reagendada' ? ' · reagendada' : '';
   return `
-    <button class="vp-event-card" ${extraAttrs}>
-      <div class="vp-event-icon ${ev.tipo}"><i class="bi ${meta.icon}"></i></div>
+    <button class="vp-event-card" data-event-id="${c.id}">
+      <div class="vp-event-icon ${c.tipo}"><i class="bi ${meta.icon}"></i></div>
       <div>
-        <p class="vp-event-title">${meta.label}: ${ev.nombre}</p>
-        <p class="vp-event-sub">${ev.info || '—'}</p>
-        <p class="vp-event-sub">${fechaFmt}</p>
+        <p class="vp-event-title">${meta.label}: ${c.nombre}</p>
+        <p class="vp-event-sub">${c.info || '—'}</p>
+        <p class="vp-event-sub">${fechaFmt}${estadoTag}</p>
       </div>
       <span class="vp-event-badge">${pet ? pet.nombre : '—'}</span>
     </button>`;
@@ -362,83 +307,79 @@ function eventCardHTML(ev, extraAttrs=''){
 
 function renderEventsList(){
   const list = document.getElementById('eventsList');
-  const events = state.events
-    .filter(ev => !state.selectedPetId || ev.petId === state.selectedPetId)
+  const citas = db.getCitas()
+    .filter(c => c.estado !== 'cancelada' && (!ui.selectedPetId || c.mascotaId === ui.selectedPetId))
     .sort((a,b)=> new Date(a.fecha) - new Date(b.fecha));
 
-  if(events.length === 0){
+  if(citas.length === 0){
     list.innerHTML = `<div class="vp-empty"><i class="bi bi-calendar2-week"></i><p>No hay eventos próximos.<br>Toca "Nueva cita" para agendar uno.</p></div>`;
     return;
   }
-  list.innerHTML = events.map(ev => eventCardHTML(ev, `onclick="openEventActionModal(${ev.id})"`)).join('');
+  list.innerHTML = citas.map(c => eventCardHTML(c)).join('');
+  list.querySelectorAll('[data-event-id]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openEventActionModal(btn.dataset.eventId));
+  });
 }
 
-/* --- Nueva cita (modal) --- */
+/* --- Nueva cita --- */
 function openNuevaCitaModal(){
-  if(state.pets.length === 0){ showToast('Añade una mascota antes de crear una cita'); return; }
+  const mascotas = db.getMascotas();
+  if(mascotas.length === 0){ showToast('Añade una mascota antes de crear una cita'); return; }
   const select = document.getElementById('citaPet');
-  select.innerHTML = state.pets.map(p=>`<option value="${p.id}" ${p.id===state.selectedPetId?'selected':''}>${p.nombre}</option>`).join('');
+  select.innerHTML = mascotas.map(p=>`<option value="${p.id}" ${p.id===ui.selectedPetId?'selected':''}>${p.nombre}</option>`).join('');
   document.getElementById('formNuevaCita').reset();
-  select.value = state.selectedPetId;
+  select.value = ui.selectedPetId;
   modalOf('modalNuevaCita').show();
 }
 
 document.getElementById('formNuevaCita').addEventListener('submit', function(e){
   e.preventDefault();
-  const nuevoEvento = {
-    id: Date.now(),
-    petId: Number(document.getElementById('citaPet').value),
-    tipo: document.getElementById('citaTipo').value,
-    nombre: document.getElementById('citaNombre').value.trim(),
-    info: document.getElementById('citaInfo').value.trim(),
-    fecha: document.getElementById('citaFecha').value
-  };
-  if(!nuevoEvento.nombre || !nuevoEvento.fecha){ showToast('Completa nombre y fecha de la cita'); return; }
+  const nombre = document.getElementById('citaNombre').value.trim();
+  const fecha = document.getElementById('citaFecha').value;
+  if(!nombre || !fecha){ showToast('Completa nombre y fecha de la cita'); return; }
 
-  state.events.push(nuevoEvento);
-  saveState();
+  db.addCita({
+    mascotaId: document.getElementById('citaPet').value,
+    tipo: document.getElementById('citaTipo').value,
+    nombre,
+    info: document.getElementById('citaInfo').value.trim(),
+    fecha
+  });
+
   modalOf('modalNuevaCita').hide();
   renderAgenda();
   showToast('Cita agendada con éxito');
 });
 
-/* --- Acciones sobre una cita existente: reagendar / cancelar --- */
-let activeEventId = null;
-
+/* --- Acciones sobre una cita existente --- */
 function openEventActionModal(eventId, forzarModo){
-  const ev = state.events.find(e=>e.id===eventId);
-  if(!ev) return;
-  activeEventId = eventId;
+  const cita = db.getCita(eventId);
+  if(!cita) return;
 
-  const pet = state.pets.find(p=>p.id===ev.petId);
-  const meta = eventTipoMeta(ev.tipo);
-  const fechaFmt = new Date(ev.fecha + 'T00:00:00').toLocaleDateString('es-ES', {day:'2-digit', month:'long', year:'numeric'});
+  const pet = db.getMascota(cita.mascotaId);
+  const meta = eventTipoMeta(cita.tipo);
+  const fechaFmt = new Date(cita.fecha+'T00:00:00').toLocaleDateString('es-ES',{day:'2-digit',month:'long',year:'numeric'});
 
-  document.getElementById('eventActionTitle').textContent = `${meta.label}: ${ev.nombre}`;
-  document.getElementById('eventActionInfo').textContent = `${pet ? pet.nombre : '—'} · ${ev.info || 'Sin información adicional'} · Fecha actual: ${fechaFmt}`;
+  document.getElementById('eventActionTitle').textContent = `${meta.label}: ${cita.nombre}`;
+  document.getElementById('eventActionInfo').textContent = `${pet?pet.nombre:'—'} · ${cita.info||'Sin información adicional'} · Fecha actual: ${fechaFmt}`;
 
   const box = document.getElementById('eventReagendarBox');
   const fechaInput = document.getElementById('eventNuevaFecha');
   box.classList.add('d-none');
-  fechaInput.value = ev.fecha;
+  fechaInput.value = cita.fecha;
 
   document.getElementById('btnEventReagendar').onclick = ()=>{
-    if(box.classList.contains('d-none')){
-      box.classList.remove('d-none');
-      return;
-    }
+    if(box.classList.contains('d-none')){ box.classList.remove('d-none'); return; }
     const nuevaFecha = fechaInput.value;
     if(!nuevaFecha){ showToast('Selecciona una nueva fecha'); return; }
-    ev.fecha = nuevaFecha;
-    saveState();
+    db.reagendarCita(cita.id, nuevaFecha);
     modalOf('modalEventAction').hide();
     renderAgenda();
     showToast('Cita reagendada con éxito');
   };
 
   document.getElementById('btnEventCancelar').onclick = ()=>{
-    state.events = state.events.filter(e=>e.id !== eventId);
-    saveState();
+    db.cancelarCita(cita.id);
     modalOf('modalEventAction').hide();
     renderAgenda();
     showToast('Cita cancelada');
@@ -449,92 +390,82 @@ function openEventActionModal(eventId, forzarModo){
 }
 
 /* ---------------------------------------------------------
-   8) VISTA: AÑADIR SERVICIO
+   6) VISTA: AÑADIR SERVICIO (stepper + registro en historial)
    --------------------------------------------------------- */
+const SERVICES_CATALOG = [
+  { key:'medicamentos', nombre:'Medicamentos' },
+  { key:'antipulgas', nombre:'Antipulgas' },
+  { key:'consultas', nombre:'Consultas' },
+  { key:'vacunas', nombre:'Vacunas' },
+  { key:'banio', nombre:'Baño y corte de uñas' },
+  { key:'pelo', nombre:'Corte de pelo' }
+];
+let serviceCounts = {};
+
 function renderServicios(){
   const wrap = document.getElementById('serviceListWrap');
-  wrap.innerHTML = state.servicesCatalog.map(svc=>{
-    const count = state.serviceCounts[svc.key] || 0;
+  wrap.innerHTML = SERVICES_CATALOG.map(svc=>{
+    const count = serviceCounts[svc.key] || 0;
     return `
       <div class="vp-service-row">
         <span class="vp-service-name">${svc.nombre}</span>
         <div class="vp-stepper">
-          <button class="vp-step-btn" onclick="stepService('${svc.key}',-1)" ${count===0?'disabled':''}>−</button>
-          <span class="vp-step-count" id="count-${svc.key}">${count}</span>
-          <button class="vp-step-btn plus" onclick="stepService('${svc.key}',1)">+</button>
+          <button class="vp-step-btn" data-step="${svc.key}" data-delta="-1" ${count===0?'disabled':''}>−</button>
+          <span class="vp-step-count">${count}</span>
+          <button class="vp-step-btn plus" data-step="${svc.key}" data-delta="1">+</button>
         </div>
       </div>`;
   }).join('');
+  wrap.querySelectorAll('[data-step]').forEach(btn=>{
+    btn.addEventListener('click', ()=> stepService(btn.dataset.step, Number(btn.dataset.delta)));
+  });
 }
-
 function stepService(key, delta){
-  const current = state.serviceCounts[key] || 0;
-  const next = Math.max(0, current + delta);
-  state.serviceCounts[key] = next;
-  saveState();
+  serviceCounts[key] = Math.max(0, (serviceCounts[key]||0) + delta);
   renderServicios();
 }
-
 function guardarServicios(){
-  if(state.pets.length === 0){ showToast('Añade una mascota antes de agendar un servicio'); return; }
-  const pet = state.pets.find(p=>p.id===state.selectedPetId) || state.pets[0];
-  const seleccionados = Object.entries(state.serviceCounts).filter(([,c])=> c > 0);
-
+  const mascotas = db.getMascotas();
+  if(mascotas.length === 0){ showToast('Añade una mascota antes de agendar un servicio'); return; }
+  const pet = db.getMascota(ui.selectedPetId) || mascotas[0];
+  const seleccionados = Object.entries(serviceCounts).filter(([,c])=> c>0);
   if(seleccionados.length === 0){ showToast('Selecciona al menos un servicio'); return; }
 
-  const hoy = new Date();
-  const mesLabel = MESES[hoy.getMonth()].slice(0,3).toUpperCase() + ' ' + hoy.getFullYear();
-
-  seleccionados.forEach(([key, count])=>{
-    const svc = state.servicesCatalog.find(s=>s.key===key);
-    state.historial.unshift({
-      petId: pet ? pet.id : null,
-      mes: mesLabel,
-      fecha: `${pad(hoy.getDate())}/${pad(hoy.getMonth()+1)}/${hoy.getFullYear()}`,
-      titulo: svc.nombre,
-      desc: `Cantidad: ${count}. Servicio agendado desde la app.`
-    });
+  seleccionados.forEach(([key,count])=>{
+    const svc = SERVICES_CATALOG.find(s=>s.key===key);
+    db.registrarServicio(svc.nombre, count, pet.id); // auto-log en historial
   });
 
-  state.serviceCounts = {};
-  saveState();
+  serviceCounts = {};
   renderServicios();
   showToast('Servicio(s) añadido(s) al historial');
   goTo('historial');
 }
 
 /* ---------------------------------------------------------
-   9) VISTA: HISTORIAL (búsqueda + filtros)
+   7) VISTA: HISTORIAL (auditoría: mascota | cita | servicio | nota)
    --------------------------------------------------------- */
 const HISTORIAL_FILTROS = [
   { key:'todos', label:'Todos' },
-  { key:'medicamentos', label:'Medicamentos' },
-  { key:'vacunas', label:'Vacunas' },
-  { key:'consultas', label:'Consultas' },
-  { key:'banio', label:'Baño y corte' }
+  { key:'mascota', label:'Mascotas' },
+  { key:'cita', label:'Citas' },
+  { key:'servicio', label:'Servicios' },
+  { key:'nota', label:'Notas' }
 ];
 let historialFiltroActivo = 'todos';
-
-function coincideFiltro(item, filtro){
-  const t = item.titulo.toLowerCase();
-  if(filtro === 'todos') return true;
-  if(filtro === 'medicamentos') return t.includes('medicamento') || t.includes('antibiótico') || t.includes('antipulgas');
-  if(filtro === 'vacunas') return t.includes('vacuna');
-  if(filtro === 'consultas') return t.includes('consulta');
-  if(filtro === 'banio') return t.includes('baño') || t.includes('corte');
-  return true;
-}
 
 function renderFiltrosHistorial(){
   const wrap = document.getElementById('historialFiltros');
   wrap.innerHTML = HISTORIAL_FILTROS.map(f=>
-    `<button class="vp-filter-chip ${f.key===historialFiltroActivo?'active':''}" onclick="setFiltroHistorial('${f.key}')">${f.label}</button>`
+    `<button class="vp-filter-chip ${f.key===historialFiltroActivo?'active':''}" data-filtro="${f.key}">${f.label}</button>`
   ).join('');
+  wrap.querySelectorAll('[data-filtro]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ historialFiltroActivo = btn.dataset.filtro; renderHistorial(); });
+  });
 }
-function setFiltroHistorial(key){
-  historialFiltroActivo = key;
-  renderFiltrosHistorial();
-  renderHistorial();
+
+function iconoPorTipo(tipo){
+  return { mascota:'bi-heart-pulse', cita:'bi-calendar-check', servicio:'bi-bag-check', nota:'bi-journal-medical' }[tipo] || 'bi-clock-history';
 }
 
 function renderHistorial(){
@@ -542,62 +473,78 @@ function renderHistorial(){
   const container = document.getElementById('historialList');
   const query = (document.getElementById('historialSearch')?.value || '').toLowerCase().trim();
 
-  let items = state.historial.filter(h=>{
-    const matchTexto = !query || (h.titulo + ' ' + h.desc).toLowerCase().includes(query);
-    return matchTexto && coincideFiltro(h, historialFiltroActivo);
-  });
+  const filtroTipo = historialFiltroActivo === 'todos' ? null : historialFiltroActivo;
+  let items = db.getHistorial({ tipo: filtroTipo })
+    .filter(h => !query || h.descripcion.toLowerCase().includes(query));
 
   if(items.length === 0){
-    container.innerHTML = `<div class="vp-empty"><i class="bi bi-search"></i><p>No se encontraron resultados.</p></div>`;
+    container.innerHTML = `<div class="vp-empty"><i class="bi bi-search"></i><p>No se encontraron registros.</p></div>`;
     return;
   }
 
   const groups = {};
   items.forEach(h=>{
-    if(!groups[h.mes]) groups[h.mes] = [];
-    groups[h.mes].push(h);
+    const d = new Date(h.fecha+'T00:00:00');
+    const label = `${MESES[d.getMonth()].slice(0,3).toUpperCase()} ${d.getFullYear()}`;
+    (groups[label] ||= []).push(h);
   });
 
   let html = '';
-  Object.keys(groups).forEach(mes=>{
-    html += `<div class="vp-month-label">${mes}</div>`;
-    groups[mes].forEach(h=>{
-      const pet = state.pets.find(p=>p.id===h.petId);
-      const t = h.titulo.toLowerCase();
-      const icon = t.includes('medic') ? 'bi-capsule'
-                 : t.includes('vacuna') ? 'bi-shield-plus'
-                 : t.includes('consulta') ? 'bi-clipboard2-pulse'
-                 : 'bi-heart-pulse';
+  Object.keys(groups).forEach(mesLabel=>{
+    html += `<div class="vp-month-label">${mesLabel}</div>`;
+    groups[mesLabel].forEach(h=>{
+      const pet = h.mascotaId ? db.getMascota(h.mascotaId) : null;
+      const fechaFmt = new Date(h.fecha+'T00:00:00').toLocaleDateString('es-ES',{day:'2-digit',month:'short'});
       html += `
         <div class="vp-card vp-hist-card">
-          <div class="vp-hist-icon"><i class="bi ${icon}"></i></div>
+          <div class="vp-hist-icon"><i class="bi ${iconoPorTipo(h.tipo)}"></i></div>
           <div class="flex-grow-1">
-            <p class="vp-hist-title">${h.fecha} &nbsp;·&nbsp; ${h.titulo}</p>
-            <p class="vp-hist-desc">${h.desc}</p>
+            <p class="vp-hist-title">${fechaFmt} ${h.hora} &nbsp;·&nbsp; ${h.descripcion}</p>
           </div>
-          <span class="vp-event-badge" style="align-self:flex-start;">${pet ? pet.nombre : '—'}</span>
+          ${pet ? `<span class="vp-event-badge" style="align-self:flex-start;">${pet.nombre}</span>` : ''}
         </div>`;
     });
   });
   container.innerHTML = html;
 }
+document.getElementById('historialSearch').addEventListener('input', renderHistorial);
 
 /* ---------------------------------------------------------
-   10) VISTA: CONFIGURACIÓN
+   8) NOTAS CLÍNICAS / MANUALES
+   --------------------------------------------------------- */
+function openNotaModal(){
+  const select = document.getElementById('notaMascota');
+  select.innerHTML = `<option value="">General (sin mascota específica)</option>` +
+    db.getMascotas().map(p=>`<option value="${p.id}" ${p.id===ui.selectedPetId?'selected':''}>${p.nombre}</option>`).join('');
+  document.getElementById('formNota').reset();
+  select.value = ui.selectedPetId || '';
+  modalOf('modalNota').show();
+}
+document.getElementById('formNota').addEventListener('submit', function(e){
+  e.preventDefault();
+  const texto = document.getElementById('notaTexto').value.trim();
+  const mascotaId = document.getElementById('notaMascota').value || null;
+  try{
+    db.registrarNota(texto, mascotaId);
+    modalOf('modalNota').hide();
+    showToast('Nota guardada en el historial');
+  }catch(err){
+    showToast(err.message);
+  }
+});
+
+/* ---------------------------------------------------------
+   9) VISTA: CONFIGURACIÓN
    --------------------------------------------------------- */
 function editarPerfilCampo(campo){
-  const actual = campo === 'nombre' ? state.perfil.nombre : state.perfil.telefono;
-  const valor = prompt(campo === 'nombre' ? 'Editar nombre:' : 'Añadir número telefónico:', actual || '');
+  const valor = prompt(campo==='nombre' ? 'Editar nombre:' : 'Añadir número telefónico:', '');
   if(valor === null) return;
-  state.perfil[campo] = valor.trim();
-  saveState();
   showToast('Perfil actualizado');
 }
 
-/* Contenido de los modales informativos (Sobre nosotros / Política / Términos / Contacto) */
 const INFO_CONTENT = {
   sobre: { title:'Sobre nosotros', body:'VidaPet es una app para organizar la salud y el cuidado de tus mascotas: consultas, vacunas, medicamentos y servicios, todo en un solo lugar.' },
-  politica: { title:'Política de privacidad', body:'Los datos de tus mascotas se guardan únicamente en este dispositivo. VidaPet no comparte tu información con terceros.' },
+  politica: { title:'Política de privacidad', body:'Los datos de tus mascotas se guardan únicamente en este dispositivo (localStorage). VidaPet no comparte tu información con terceros.' },
   terminos: { title:'Términos y condiciones', body:'El uso de VidaPet implica la aceptación de estos términos. La app se ofrece "tal cual", con fines demostrativos.' },
   contacto: { title:'Contáctanos', body:'¿Tienes problemas con la app? Escríbenos a soporte@vidapet.app y te responderemos a la brevedad.' }
 };
