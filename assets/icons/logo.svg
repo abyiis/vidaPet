@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="vpLogoTitle">
+  <title id="vpLogoTitle">VidaPet</title>
+  <defs>
+    <linearGradient id="vpLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0088CC"/>
+      <stop offset="100%" stop-color="#00B4D8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#vpLogoGrad)"/>
+  <!-- corazón -->
+  <path fill="#FFFFFF" opacity="0.95" d="M32 44.5c-.5 0-1-.17-1.4-.5-4.3-3.6-9.9-8.6-9.9-14.6 0-4 3.1-7.1 7-7.1 2.2 0 4.3 1.1 5.6 2.9C34.6 23.4 36.7 22.3 39 22.3c3.9 0 7 3.1 7 7.1 0 6-5.6 11-9.9 14.6-.4.33-.9.5-1.4.5z"/>
+  <!-- huella pequeña -->
+  <g fill="#2EE6C5">
+    <circle cx="18" cy="18" r="2.6"/>
+    <circle cx="24" cy="14.5" r="2.2"/>
+    <circle cx="30" cy="14" r="2"/>
+  </g>
+</svg>
